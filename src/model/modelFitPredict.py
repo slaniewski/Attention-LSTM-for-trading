@@ -30,19 +30,38 @@ import time
 
 ## This is our custom loss function
 
+
+# def custom_penalty(y_pred):
+#     # High penalty for predictions with absolute value below 0.001
+#     low_threshold_penalty = tf.where(tf.abs(y_pred) < 0.001, 1.0, 0.0)
+    
+#     # Linear penalty for predictions between 0.001 and 0.005
+#     linear_penalty_region = tf.where((tf.abs(y_pred) >= 0.001) & (tf.abs(y_pred) <= 0.005), 1.0, 0.0)
+#     linear_penalty = linear_penalty_region * (0.005 - tf.abs(y_pred))
+    
+#     return low_threshold_penalty + linear_penalty
+
 def MADL_mod(y_true, y_pred):
     # Directional term
-    directional_term = (-1/2) * tf.sign(y_true * y_pred) * tf.abs(y_true)
+    directional_term = (-1) * tf.sign(y_true * y_pred) * tf.abs(y_true)
     
     # Magnitude term
-    magnitude_term = tf.square(y_pred - y_true)  
+    magnitude_term = 10*tf.square(y_pred - y_true)  
     
     # Combine and take the maximum with 0
-    loss = tf.maximum(directional_term + magnitude_term, 0.0) + 1e-5
+    loss = tf.maximum(directional_term + magnitude_term, 0.0) + 4e-6
+    
+    # low_threshold_penalty = tf.where(tf.abs(y_pred) < 0.001, 2.0, 0.0)
+    
+    # # Linear penalty for predictions between 0.001 and 0.005
+    # linear_penalty_region = tf.where((tf.abs(y_pred) >= 0.001) & (tf.abs(y_pred) <= 0.005), 1.4, 0.0)
+    # linear_penalty = linear_penalty_region * (0.005 - tf.abs(y_pred))
+
+    # Add the custom penalty
+    # loss += low_threshold_penalty + linear_penalty
     
     # Return the mean loss over the batch
     return tf.reduce_mean(loss)
-
 
 class RollingLSTM:
     def __init__(self) -> None:
@@ -112,8 +131,8 @@ class RollingLSTM:
             validation_set_shapes = (self.x_train[i][-validation_window_size:].shape, self.y_train[i][-validation_window_size:].shape)
             self.logger.info(f"Validation window dimensions (features, targets): {validation_set_shapes[0]}, " + f"{validation_set_shapes[1]}")
         #change patience for different loss function if needed
-        mm = 2 if self.hp_lss=='MSE' else 2
-        es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=3*mm, restore_best_weights = True, min_delta=self.early_stopping_min_delta)
+        mm = 1 if self.hp_lss=='MSE' else 1
+        es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=5*mm, restore_best_weights = True, min_delta=self.early_stopping_min_delta)
         tuner.search(
             self.x_train[i][:-validation_window_size]
             , self.y_train[i][:-validation_window_size]
@@ -271,8 +290,8 @@ class RollingLSTM:
         self.hp_lss = hp_loss_fun_name
         # Sequential model definition:
         l1_ratio = 0.5  # Adjust this value. 1 = Lasso; 0 = Ridge
-        l1_value = 1.5 * hp_regularization * l1_ratio
-        l2_value = hp_regularization * (1 - l1_ratio)
+        l1_value = hp_regularization * l1_ratio
+        l2_value = 0.01 * hp_regularization * (1 - l1_ratio)
         layer_list = []
         for _ in range(hp_hidden_layers-1): 
             layer_list.append(tf.keras.layers.LSTM(
@@ -282,15 +301,15 @@ class RollingLSTM:
                 , stateful=True
                 , dropout=hp_dropout
                 , return_sequences=True
-                kernel_regularizer=regularizers.l1_l2(l1=l1_value, l2=l2_value),
+                , kernel_regularizer=regularizers.l1_l2(l1=l1_value, l2=l2_value),
                 recurrent_regularizer=regularizers.l1_l2(l1=l1_value, l2=l2_value)
             ))
         layer_list.extend([
             layers.LSTM(hp_units, batch_input_shape=batch_input_shape
                 , activation=self.config["model"]["ActivationFunction"], dropout=hp_dropout
                 , stateful=True, return_sequences=False
-                  kernel_regularizer=regularizers.l1_l2(l1=l1_value, l2=l2_value),
-                  recurrent_regularizer=regularizers.l1_l2(l1=l1_value, l2=l2_value) )
+                , kernel_regularizer=regularizers.l1_l2(l1=l1_value, l2=l2_value),
+                recurrent_regularizer=regularizers.l1_l2(l1=l1_value, l2=l2_value)  )
             , layers.Dense(1)
         ])
         model = tf.keras.Sequential(layer_list)
@@ -312,16 +331,18 @@ class RollingLSTM:
         with open(self.config["prep"]["PredictionsArray"], 'rb') as handle: preds = pickle.load(handle)
         try:
             df_pred_eval = pd.DataFrame(
-                zip(self.window_dict['dates_test'].reshape(-1), preds.reshape(-1), self.window_dict['closes_test'].reshape(-1), (closes[1:] - closes[:-1]) / closes[:-1]),
+                zip(self.window_dict['dates_test'].reshape(-1), preds.reshape(-1), self.window_dict['closes_test'].reshape(-1), ((closes[1:] - closes[:-1]) / closes[:-1]).reshape(-1)),
                 columns=['Date', 'Pred', 'Real', "Real_ret"]
             )
         except:
             try:
+                print('tutaj')
                 df_pred_eval = pd.DataFrame(
-                    zip(self.window_dict['dates_test'].reshape(-1), preds.reshape(-1), np.insert((closes[1:] - closes[:-1]) / closes[:-1], 0, np.nan)),
+                    zip(self.window_dict['dates_test'].reshape(-1), preds.reshape(-1), np.insert((closes[1:] - closes[:-1]) / closes[:-1], 0, np.nan).reshape(-1)),
                     columns=['Date', 'Pred', 'Real', "Real_ret"]
                 )
             except:
+                print('tutaj2')
                 df_pred_eval = pd.DataFrame(
                     zip(self.window_dict['dates_test'].reshape(-1), preds.reshape(-1), self.window_dict['closes_test'].reshape(-1)),
                     columns=['Date', 'Pred', 'Real']

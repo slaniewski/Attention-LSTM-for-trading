@@ -122,8 +122,13 @@ class Plots:
             self.window_dict['dates_test'].reshape(-1)[0], int(np.max(self.eq_line_array) * 0.6),
             txt, fontsize=12, fontdict=self.csfont
         )
-        plt.plot(self.window_dict['dates_test'].reshape(-1), self.eq_line_array.reshape(-1))
-        plt.plot(self.window_dict['dates_test'].reshape(-1), self.window_dict['closes_test'].reshape(-1), color='black')
+        min_length = min(len(self.window_dict['dates_test'].reshape(-1)), len(self.eq_line_array.reshape(-1)))
+
+        plt.plot(self.window_dict['dates_test'].reshape(-1)[:min_length], self.eq_line_array.reshape(-1)[:min_length])
+        plt.plot(self.window_dict['dates_test'].reshape(-1)[:min_length], self.window_dict['closes_test'].reshape(-1)[:min_length], color='black')
+
+        # plt.plot(self.window_dict['dates_test'].reshape(-1), self.eq_line_array.reshape(-1))
+        # plt.plot(self.window_dict['dates_test'].reshape(-1), self.window_dict['closes_test'].reshape(-1), color='black')
 
         ax = plt.gca()
         ax.set_title(

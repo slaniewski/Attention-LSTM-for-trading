@@ -141,7 +141,7 @@ class PerformanceMetrics:
                         counter += 1
 
             # If Previous short
-            elif positions[i-1] == -1:
+            else: #if positions[i-1] == -1:
                 
                 # If current short => threshold doesn't matter, keep short
                 if predictions[i] < 0:
@@ -230,7 +230,11 @@ class PerformanceMetrics:
         :param scale: number of days required for normalization. By default in a year there are 252 trading days.
         :return: ARC as percentage
         """
-        return (equity_array[-1] / equity_array[0]) ** (scale / len(equity_array)) - 1
+        ratio = equity_array[-1] / equity_array[0]
+        result = np.sign(ratio) * (np.abs(ratio) ** (scale / len(equity_array))) - 1
+        return result
+
+        # return (equity_array[-1] / equity_array[0]) ** (scale / len(equity_array)) - 1
 
     def ir(self, equity_array: np.array, scale=252) -> float:
         """
