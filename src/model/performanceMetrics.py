@@ -26,23 +26,27 @@ class PerformanceMetrics:
 
         # Load evaluation data for performance metrics
         self.load_latest_eval_data()
-        returns_array, inside_thres_count, positions_array = (
+        returns_array, inside_thres_count, positions_array, transactions = (
             self.returns(self.eval_data["Pred"].values, self.eval_data["Real"].values)
         )
         self.logger.info(
             f'Out of {returns_array.shape[0]} observations, there were {inside_thres_count} '
             + f'predictions under threshold of {self.pred_thres}')
+        self.logger.info(
+            f'There were {transactions} transactions')
         pos_counter = Counter(positions_array)
         self.logger.info(f'Positions: [Long]: {pos_counter[1]}, [Short]: {pos_counter[-1]}')
         equity_line = self.eq_line(returns_array, self.eval_data["Real"].values[0])
-
+        accuracy_val = self.accuracy(self.eval_data["Pred"].values, self.eval_data["Real"].values)
         # Save performance statistics to a dictionary
         metrics = {
             "[ARC_BH]": str(np.round(self.arc(self.eval_data["Real"].values) * 100, 2)) + "%",
             "[ARC_EQ]": str(np.round(self.arc(equity_line) * 100, 2)) + "%",
             "[ASD_EQ]": str(np.round(self.asd(equity_line), 4)),
             "[IR_EQ]": str(np.round(self.ir(equity_line), 4)),
-            "[MLD_EQ]": str(np.round(self.mld(returns_array) * 100, 2)) + "% of the year"
+            "[Accuracy]": str(np.round(accuracy_val, 2)) + "%",
+            "[Days_to_new_peak]": str(np.round(self.days_to_new_peak(returns_array), 2)),
+            "[Loss_in_row]": str(np.round(self.mld(returns_array), 2)) # + "% of the year"
         }
 
         # Save results to .json file
@@ -57,10 +61,13 @@ class PerformanceMetrics:
         self.logger.info(f'[ARC_EQ]:    {metrics["[ARC_EQ]"]}')
         self.logger.info(f'[ASD_EQ]:    {metrics["[ASD_EQ]"]}')
         self.logger.info(f'[IR_EQ]:     {metrics["[IR_EQ]"]}')
-        self.logger.info(f'[MLD_EQ]:    {metrics["[MLD_EQ]"]}')
+        self.logger.info(f'[Accuracy]:     {metrics["[Accuracy]"]}') 
+        self.logger.info(f'[Days_to_new_peak]:     {metrics["[Days_to_new_peak]"]}') 
+        self.logger.info(f'[Loss_in_row]:    {metrics["[Loss_in_row]"]}')
 
         return equity_line
 
+    # tutaj zrobic loop po kazdym z modeli, a nie brac tylko ostatni
     def load_latest_eval_data(self) -> int:
         files = os.listdir(self.config["prep"]["DataOutputDir"])
         pickles = [f'{self.config["prep"]["DataOutputDir"]}{f}' for f in files
@@ -104,10 +111,11 @@ class PerformanceMetrics:
         :param actual_values: array of actual values
         :return: returns array, counter of transactions below threshold, array of position indicators
         """
-        positions = [1]  # store positions (1 for long, -1 for short), first is long by default
-        counter = 0  # count positions inside the threshold
+        positions = [-1]  # store positions (1 for long, -1 for short), first is short by default
+        transactions, counter = 0, 0  # count positions inside the threshold
         returns_array = []  # output array
-        for i in range(1, actual_values.shape[0], 1):  # for i in actual values
+        start_of_prediction = 1 #change for last datapoint in train for TEST DATASET
+        for i in range(start_of_prediction, actual_values.shape[0], 1):  # for i in actual values
 
             # If Previous long
             if positions[i-1] == 1:
@@ -118,40 +126,44 @@ class PerformanceMetrics:
                     positions.append(1)
 
                 # If current short => check threshold
-                elif predictions[i] < 0:
+                else: #predictions[i] < 0:
 
                     # If abs(x) > threshold => position change long->short
                     if abs(predictions[i]) > self.pred_thres:
-                        returns_array.append(actual_values[i - 1] - actual_values[i] - 2 * self.tr_cost)
+                        returns_array.append(actual_values[i - 1] - actual_values[i] - 2 * self.tr_cost * actual_values[i - 1])
                         positions.append(-1)
+                        transactions += 1
 
                     # If abs(x) < threshold => long position unchanged
-                    elif abs(predictions[i]) < self.pred_thres:
+                    else: # abs(predictions[i]) < self.pred_thres:
                         returns_array.append(actual_values[i] - actual_values[i - 1])
                         positions.append(1)
+                        counter += 1
 
             # If Previous short
             elif positions[i-1] == -1:
-
+                
                 # If current short => threshold doesn't matter, keep short
                 if predictions[i] < 0:
                     returns_array.append(actual_values[i - 1] - actual_values[i])
                     positions.append(-1)
 
                 # If current long => check threshold
-                elif predictions[i] > 0:
+                else: #if predictions[i] > 0:
 
                     # If abs(x) > threshold => position change short->long
                     if abs(predictions[i]) > self.pred_thres:
-                        returns_array.append(actual_values[i] - actual_values[i - 1] - 2 * self.tr_cost)
+                        returns_array.append(actual_values[i] - actual_values[i - 1] - 2 * self.tr_cost * actual_values[i - 1])
                         positions.append(1)
+                        transactions += 1
 
                     # If abs(x) < threshold => short position unchanged
-                    elif abs(predictions[i]) < self.pred_thres:
+                    else: #if abs(predictions[i]) < self.pred_thres:
                         returns_array.append(actual_values[i - 1] - actual_values[i])
                         positions.append(-1)
+                        counter += 1
 
-        return np.asarray(returns_array), counter, positions
+        return np.asarray(returns_array), counter, positions, transactions
 
     def eq_line(self, returns_array, _n_value):
         """
@@ -230,33 +242,72 @@ class PerformanceMetrics:
         return self.arc(equity_array, scale) / self.asd(equity_array, scale)
 
     @staticmethod
-    def mld(returns_array: np.array, scale: int = 252) -> float:
+    def mld(returns_array: np.array, scale: int = 1) -> float:
         """
-        Maximum Loss Duration
-        Maximum number of time steps when the returns were below 0
-        :param returns_array: array of investment returns
-        :param scale: number of days required for normalization. By default, in a year there are 252 trading days.
+        Maximum Loss Duration (MLD)
+        Calculates the maximum number of consecutive time steps when the returns were below 0.
+        
+        :param returns_array: Array of investment returns.
+        :param scale: Number of days required for normalization. By default, in a year there are 252 trading days.
         :return: MLD
         """
-        max_loss = 0
-        curr = 0
-        for i in range(returns_array.shape[0]):
-
-            # If first returns is negative, add this occurrence to max loss counter
-            # If it's positive, continue
-            if i == 0 and returns_array[0] < 0:
-                curr += 1
-                max_loss = curr
-
-            # If the equity continues dropping
-            elif (i > 0) and (returns_array[i-1] < 0) and (returns_array[i] < 0):
-                curr += 1
-                if max_loss < curr:
-                    max_loss = curr
-
-            # If the equity stops dropping
-            elif (i > 0) and (returns_array[i-1] < 0) and (returns_array[i] > 0):
-                curr = 0
+        
+        max_consecutive_losses = 0
+        current_consecutive_losses = 0
+        
+        for ret in returns_array:
+            if ret < 0:
+                current_consecutive_losses += 1
+                max_consecutive_losses = max(max_consecutive_losses, current_consecutive_losses)
+            else:
+                current_consecutive_losses = 0
 
         # Normalize over the number of trading days in a year
-        return max_loss / scale
+        return max_consecutive_losses / scale
+    
+    @staticmethod
+    def days_to_new_peak(returns_array: np.array) -> int:
+        """
+        Days to New Peak (DNP)
+        Calculates the maximum number of consecutive days until a new peak in returns was achieved.
+        
+        :param returns_array: Array of cumulative investment returns.
+        :return: DNP (Days to New Peak)
+        """
+        
+        max_days_to_peak = 0
+        current_days_to_peak = 0
+        current_peak = returns_array[0]
+
+        for ret in returns_array:
+            if ret > current_peak:
+                current_peak = ret
+                current_days_to_peak = 0
+            else:
+                current_days_to_peak += 1
+                max_days_to_peak = max(max_days_to_peak, current_days_to_peak)
+
+        return max_days_to_peak
+
+    
+    @staticmethod
+    def accuracy(predicted_values: np.array, actual_values: np.array) -> float:
+        """
+        Calculates the accuracy for binary predictions.
+        
+        :param predicted_values: Array of predicted continuous values.
+        :param actual_values: Array of actual continuous values.
+        :return: Accuracy as a percentage.
+        """
+
+        # Convert continuous values to binary labels
+        predicted_labels = np.where(np.diff(predicted_values) >= 0, 1, 0)
+        actual_labels = np.where(np.diff(actual_values) >= 0, 1, 0)
+
+        # Calculate the number of correct predictions
+        correct_predictions = np.sum(predicted_labels == actual_labels)
+
+        # Calculate accuracy
+        accuracy_percentage = (correct_predictions / len(predicted_labels)) * 100
+
+        return accuracy_percentage

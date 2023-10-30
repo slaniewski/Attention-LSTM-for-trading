@@ -87,7 +87,18 @@ class Plots:
         if show_results:
             plt.show()
 
+        plt.clf()
+        plt.figure(figsize=(8, 4))
+        self.eval_data["Real"].pct_change(1).plot.hist(bins=bins, color="darkslategrey", ec="darkslategrey")
+        plt.xlabel("Predictions", **self.csfont)
+        plt.ylabel("Frequency", **self.csfont)
+        plt.title("Histogram of model predictions", fontsize=13, **self.csfont)
+
+        # Save histogram to .png file
+        plt.savefig(f'{self.vis_dir}realreturns_histogram_{self.timestamp}.png')
+
         return 0
+
 
     def equity_line(self, show_results=False):
         """
@@ -139,3 +150,5 @@ class Plots:
             plt.show()
 
         return 0
+
+    

@@ -31,6 +31,10 @@ class Setup:
         self.config = configparser.ConfigParser()
         self.config.read(self.CONFIG_PATH)
 
+        stock_name = self.config['prep']['Stock']
+        for key in self.config['prep']:
+            self.config['prep'][key] = self.config['prep'][key].format(stock=stock_name)
+
         if not os.path.isdir("reports/logs/"):
             os.mkdir("reports/logs/")
         logging.basicConfig(

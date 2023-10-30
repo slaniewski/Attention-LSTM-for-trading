@@ -19,7 +19,9 @@ class WindowSplit:
             "features": self.config["model"]["Features"].split(', '),
             "lookback": int(self.config["model"]["Lookback"]),
             "train_window": int(self.config["model"]["TrainWindow"]),
-            "test_window": int(self.config["model"]["TestWindow"])
+            "test_window": int(self.config["model"]["TestWindow"]),
+            "validation_window": int(self.config["model"]["ValidationWindow"])
+            
         }
         self.df_joined_path = self.setup.ROOT_PATH + self.config["prep"]["JoinedDfPkl"]
         try:
@@ -49,12 +51,19 @@ class WindowSplit:
         close_train, close_test, date_train, date_test, scalers = [], [], [], [], []
 
         # for each recalibration window
+        print(  self.params["lookback"] + self.params["train_window"]
+                , self.x_raw.shape[0] - self.params["test_window"] 
+                , self.params["validation_window"])
+        ##to make sure we fit the batch size
+        start_index = self.params["lookback"] + self.params["train_window"]
+        total_rows = self.x_raw.shape[0] - self.params["test_window"] - start_index
+        num_full_batches = total_rows // self.params["validation_window"]
+        end_index = start_index + num_full_batches * self.params["validation_window"]
+
         for i in tqdm(
-            range(
-                self.params["lookback"] + self.params["train_window"]
-                , self.x_raw.shape[0] - self.params["test_window"]
-                , self.params["test_window"]
-            ), desc="Generating windows", leave=True
+                range(start_index, end_index, self.params["validation_window"]),
+                desc="Generating windows",
+                leave=True
         ):
 
             x_buf, y_buf, x_test_buf, y_test_buf = [], [], [], []
@@ -73,14 +82,23 @@ class WindowSplit:
                 dates_train_buf.append(self.dates[j])
                 closes_train_buf.append(self.close_prices[j].copy())
 
-            # for test periods:
-            for k in range(i, i + self.params["test_window"], 1):
+           # for test periods:
+
+           ## we can think about testing all models on last window from test set 
+
+           ## ensemble idea - rolling windows
+           ## we create a pool of models with best hp
+           ## then we train stacking booster to choose model from the pool
+           ## advanced - per prediction??
+
+            for k in range(i, i + self.params["test_window"] , 1):
+                #print(k)
                 x_test_buf.append(scaler.transform(self.x_raw[k - self.params["lookback"]: k, :]))
                 y_test_buf.append([[self.y_raw[k].copy()]])
                 dates_test_buf.append(self.dates[k])  # equals to shape of dates
                 closes_test_buf.append(self.close_prices[k].copy())
 
-            # append buffers:
+          #  append buffers:
             x_train.append(x_buf)
             y_train.append(y_buf)
             x_test.append(x_test_buf)
