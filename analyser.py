@@ -3,8 +3,9 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
+namm = "2023-11-17_01-26"
 # Load the JSON file
-with open('reports/summary/training_results_2023-10-29_20-28.json', 'r') as f:
+with open(f'reports/summary/training_results_{namm}.json', 'r') as f:
     results = json.load(f)
 
 # Sort the models based on test_loss and take the top 3
@@ -49,7 +50,7 @@ for hp, _ in hp_values[0].items():
     values = [model_hp[hp] for model_hp in hp_values]
     plt.hist(values, bins=16, alpha=0.75)
     plt.title(f"Histogram for {hp}")
-    plt.savefig(f"reports/summary/analysed_hyper_perbatch_2023-10-29_20-28_{hp}.png")
+    plt.savefig(f"reports/summary/analysed_hyper_perbatch_{namm}_{hp}.png")
     plt.clf()
 
 

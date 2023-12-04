@@ -11,25 +11,26 @@ import tensorflow as tf
 def main():
 
     # Preprocessing
-    # prep = pr.TrainPrep()
+    prep = pr.TrainPrep()
 
-    # #prep.prep_icsa()
+    #prep.prep_icsa()
 
-    # prep.prep_tis()
+    prep.prep_tis()
 
-    # prep.join_inputs()
+    prep.join_inputs()
 
     # # Data split into train-test windows
-    # ws = pr.WindowSplit()
+    ws = pr.WindowSplit()
 
-    # ws.generate_windows()
+    ws.generate_windows()
 
     # # # Fit, Predict, save predictions
-    # fp = mod.RollingLSTM()
+    print(tf.version.VERSION)
+    fp = mod.RollingLSTM()
 
-    # fp.model_fit_predict_multiprocess()
+    fp.model_fit_predict_multiprocess()
 
-    # fp.save_results()
+    fp.save_results()
 
 
     # # # # Get performance metrics

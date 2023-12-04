@@ -41,12 +41,44 @@ import time
     
 #     return low_threshold_penalty + linear_penalty
 
+#moze update do 2.14 i zrobic cummin
+def custom_max_drawdown(y_pred):
+    """ Calculate the maximum drawdown in y_pred using TensorArray. """
+    # Create a TensorArray to store the cumulative minimum values
+    cummin_array = tf.TensorArray(dtype=tf.float32, size=tf.size(y_pred))
+    cummin_array = cummin_array.write(0, y_pred[0])  # Initialize with the first value
+
+    # Compute cumulative minimum using TensorArray
+    for i in tf.range(1, tf.size(y_pred)):
+        min_val = tf.minimum(cummin_array.read(i-1), y_pred[i])
+        cummin_array = cummin_array.write(i, min_val)
+
+    # Convert TensorArray back to Tensor
+    cummin = cummin_array.stack()
+
+    # Calculate drawdown and maximum drawdown
+    drawdown = y_pred - cummin
+    max_drawdown = tf.reduce_max(drawdown)
+    return max_drawdown
+
+def pnl_loss(y_true, y_pred, lambda_penalty=2.0, gamma=1.0):
+    # Loss due to difference in predicted vs. actual returns
+    mse = tf.keras.losses.MSE(y_true, y_pred)
+    sign_penalty = tf.where(tf.sign(y_true) == tf.sign(y_pred), 1.0, lambda_penalty)
+    L_return = mse * sign_penalty
+    
+    # Loss due to drawdown
+    L_drawdown = custom_max_drawdown(y_pred) * gamma
+    
+    return L_return + L_drawdown
+
+
 def MADL_mod(y_true, y_pred):
     # Directional term
     directional_term = (-1) * tf.sign(y_true * y_pred) * tf.abs(y_true)
     
     # Magnitude term
-    magnitude_term = 10*tf.square(y_pred - y_true)  
+    magnitude_term = 2*tf.square(y_pred - y_true)  
     
     # Combine and take the maximum with 0
     loss = tf.maximum(directional_term + magnitude_term, 0.0) + 4e-6
@@ -263,7 +295,8 @@ class RollingLSTM:
         loss_fun_regression = {
             # "MAPE"  : tf.keras.losses.MeanAbsolutePercentageError(),
              "MSE" : tf.keras.losses.MeanSquaredError() ,
-             "MADL2" : MADL_mod
+             "MADL2" : MADL_mod ,
+             "PNL": pnl_loss
         }
         available_optimizers = {
             "Adam"        : tf.keras.optimizers.Adam(learning_rate=hp_lr)
@@ -284,7 +317,8 @@ class RollingLSTM:
         self.early_stopping_min_delta = {
             "MSE": float(self.config["model"]["LossMinDeltaMSE"]), 
             "MAPE": float(self.config["model"]["LossMinDeltaMAPE"]),
-            "MADL2": float(self.config["model"]["LossMinDeltaMADL"])
+            "MADL2": float(self.config["model"]["LossMinDeltaMADL"]),
+            "PNL": float(self.config["model"]["LossMinDeltaPNL"])
             }[hp_loss_fun_name]
         hp_regularization = hp.Choice("regularization", values=[float(x) for x in self.config["model"]["Regularization"].split(', ')])
         self.hp_lss = hp_loss_fun_name
