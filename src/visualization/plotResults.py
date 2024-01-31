@@ -93,7 +93,18 @@ class Plots:
         if show_results:
             plt.show()
 
+        plt.clf()
+        plt.figure(figsize=(8, 4))
+        self.eval_data["Real"].pct_change(1).plot.hist(bins=bins, color="darkslategrey", ec="darkslategrey")
+        plt.xlabel("Predictions", **self.csfont)
+        plt.ylabel("Frequency", **self.csfont)
+        plt.title("Histogram of model predictions", fontsize=13, **self.csfont)
+
+        # Save histogram to .png file
+        plt.savefig(f'{self.vis_dir}realreturns_histogram_{self.timestamp}.png')
+
         return 0
+
 
     def equity_line(self, show_results=False):
         """
@@ -117,8 +128,13 @@ class Plots:
             self.window_dict['dates_test'].reshape(-1)[0], int(np.max(self.eq_line_array) * 0.6),
             txt, fontsize=12, fontdict=self.csfont
         )
-        plt.plot(self.window_dict['dates_test'].reshape(-1), self.eq_line_array.reshape(-1))
-        plt.plot(self.window_dict['dates_test'].reshape(-1), self.window_dict['closes_test'].reshape(-1), color='black')
+        min_length = min(len(self.window_dict['dates_test'].reshape(-1)), len(self.eq_line_array.reshape(-1)))
+
+        plt.plot(self.window_dict['dates_test'].reshape(-1)[:min_length], self.eq_line_array.reshape(-1)[:min_length])
+        plt.plot(self.window_dict['dates_test'].reshape(-1)[:min_length], self.window_dict['closes_test'].reshape(-1)[:min_length], color='black')
+
+        # plt.plot(self.window_dict['dates_test'].reshape(-1), self.eq_line_array.reshape(-1))
+        # plt.plot(self.window_dict['dates_test'].reshape(-1), self.window_dict['closes_test'].reshape(-1), color='black')
 
         ax = plt.gca()
         ax.set_title(
@@ -146,3 +162,5 @@ class Plots:
             plt.show()
 
         return 0
+
+    

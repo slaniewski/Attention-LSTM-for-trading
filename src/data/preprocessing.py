@@ -57,7 +57,7 @@ class TrainPrep:
         """
         Calculate Technical Indicators from the ti_dict dictionary and export to .csv
         """
-        self.logger.info(f"Preparing TIs dataset")
+        #self.logger.info(f"Preparing TIs dataset")
 
         candle_df = pd.read_csv(self.candle_df_raw_path)
         ti_dict = {
@@ -77,7 +77,7 @@ class TrainPrep:
             'CCI': talib.CCI(candle_df.High, candle_df.Low, candle_df.Close, timeperiod=14)
         }
 
-        # Create a dataframe from TI dictionary
+        # create a dataframe from ti dictionary
         tis_df = pd.DataFrame(ti_dict, index=candle_df.index)
         del ti_dict
         del candle_df
@@ -85,7 +85,7 @@ class TrainPrep:
         # delete empty head of icsa values
         tis_df.dropna(inplace=True)
 
-        # Save Technical Indicators dataframe
+        # save technical indicators dataframe
         prep_dir = self.setup.ROOT_PATH + self.config["prep"]["DataPreprocessedDir"]
         if not os.path.isdir(prep_dir): os.mkdir(prep_dir)
         tis_df.to_csv(self.setup.ROOT_PATH + self.config["prep"]["TisDfCsv"], index=False)
@@ -97,11 +97,12 @@ class TrainPrep:
         """
         Join ohlcv datasets with datasets from prep dir
         """
-
+        # for multiple stocks in directory
+        stock_name = self.config["prep"]['Stock']
         prep_dir = self.setup.ROOT_PATH + self.config["prep"]["DataPreprocessedDir"]
         df_paths = []
         for f in os.listdir(prep_dir):
-            if os.path.isfile(os.path.join(prep_dir, f)) and f.endswith('.pkl'):
+            if os.path.isfile(os.path.join(prep_dir, f)) and f.endswith('.pkl') and stock_name in f:
                 df_paths.append(prep_dir+f)
 
         self.logger.info(f"Joining datasets: {', '.join(map(str, df_paths))}")
