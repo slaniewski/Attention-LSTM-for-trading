@@ -60,7 +60,7 @@ class PerformanceMetrics:
         eq_line_path = f'{self.setup.ROOT_PATH}{self.config["prep"]["DataOutputDir"]}eq_line_{self.eval_data_timestamp}.pkl'
         self.logger.info(f'Saving Equity Line array: {eq_line_path}')
         with open(eq_line_path, 'wb') as handle:
-            pickle.dump(np.asarray(equity_line_array), handle, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(np.asarray(equity_line), handle, protocol=pickle.HIGHEST_PROTOCOL)
         shutil.copy2(eq_line_path, self.export_path)
 
         self.logger.info(f'[ARC_BH]:    {metrics["[ARC_BH]"]}')
