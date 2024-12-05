@@ -436,3 +436,116 @@ class Plots:
 
         self.logger.info(f"\nRESULTS:\n{txt}\n")        
         return 0
+    
+    def ble(self, timestamps_to_load):
+        import numpy as np
+        import datetime
+        from dateutil.relativedelta import relativedelta
+
+                # Load equity line arrays
+        equity_line_arrays_list = []
+        for t in timestamps_to_load:
+            model_eqline_dict_path = f'{self.config["prep"]["DataOutputDir"]}eq_line_{t}.pkl'
+            with open(model_eqline_dict_path, 'rb') as handle:
+                equity_line_arrays_list.append(pickle.load(handle))
+                
+        default_eq_line_shape = equity_line_arrays_list[0].shape
+        for el in equity_line_arrays_list: 
+            if el.shape != default_eq_line_shape:
+                self.logger.error("When ploting multiple equity lines, equity line arrays must be equal by shape.")
+                raise Exception
+        
+        # Load split windows dictionary (regenerate if the latest is not up-to-date)
+        with open(self.config["prep"]["WindowSplitDict"], 'rb') as handle: self.window_dict = pickle.load(handle)
+        date_flat_vector = self.window_dict['dates_test'].reshape(-1)
+        
+        # Load Buy&Hold data from 1st timestamp entry
+        eval_data_path = f'{self.config["prep"]["DataOutputDir"]}model_eval_data_{timestamps_to_load[0]}.pkl'
+        with open(eval_data_path, 'rb') as handle: buy_and_hold_array = pickle.load(handle)["Real"]
+        
+        # Load performance metrics dictionaries
+        performance_metric_dictionaries_list = []
+        for t in timestamps_to_load:
+            perf_metr_dict_path = f'{self.config["prep"]["ModelMetricsDir"]}performance_metrics_{t}.json'
+            with open(perf_metr_dict_path, 'rb') as handle:
+                performance_metric_dictionaries_list.append(json.load(handle))
+        
+        # Create a dictionary with average test results
+        mean_res_dict = {
+            "EQ_ARC": 0.0
+            ,"EQ_ASD": 0.0
+            ,"EQ_MLD": 0.0
+            ,"EQ_IR": 0.0
+            ,"EQ_IR**": 0.0
+            ,"POS_CNT": 0.0
+        }
+        for perf_dict in performance_metric_dictionaries_list:
+            for k in perf_dict.keys():
+                if k in mean_res_dict.keys():
+                    mean_res_dict[k] += float(perf_dict[k])/len(timestamps_to_load)
+        
+        mean_res_dict["EQ_ARC"] = str(format(mean_res_dict["EQ_ARC"], '.2f'))
+        mean_res_dict["EQ_ASD"] = str(format(mean_res_dict["EQ_ASD"], '.4f'))
+        mean_res_dict["EQ_MLD"] = str(format(mean_res_dict["EQ_MLD"], '.2f'))
+        mean_res_dict["EQ_IR"] = str(format(mean_res_dict["EQ_IR"], '.4f'))
+        mean_res_dict["EQ_IR**"] = str(format(mean_res_dict["EQ_IR**"], '.4f'))
+        mean_res_dict["POS_CNT"] = str(format(mean_res_dict["POS_CNT"], '.0f'))
+        
+        txt = ''''''
+        txt += f"{'-'*49}\n"
+        txt += f"| Metric\t| Buy & Hold\t| Strategy mean\t|\n".expandtabs()
+        txt += f"{'-'*49}\n"
+        extra_tab = "\t" if float(mean_res_dict["EQ_ARC"]) >= 0 else ""
+        txt += f'| aRC\t\t| {performance_metric_dictionaries_list[0]["BH_ARC"]}%\t| {mean_res_dict["EQ_ARC"]}%\t{extra_tab}|\n'.expandtabs()
+        txt += f'| aSD\t\t| {performance_metric_dictionaries_list[0]["BH_ASD"]}\t| {mean_res_dict["EQ_ASD"]}\t|\n'.expandtabs()
+        txt += f'| MLD\t\t| {performance_metric_dictionaries_list[0]["BH_MLD"]}%\t\t| {mean_res_dict["EQ_MLD"]}%\t\t|\n'.expandtabs()
+        txt += f'| IR\t\t| {performance_metric_dictionaries_list[0]["BH_IR"]}\t| {mean_res_dict["EQ_IR"]}\t|\n'.expandtabs()
+        txt += f'| IR**\t\t| {performance_metric_dictionaries_list[0]["BH_IR**"]}\t| {mean_res_dict["EQ_IR**"]}\t|\n'.expandtabs()
+        txt += f'| Positions\t| 1\t\t| {mean_res_dict["POS_CNT"]}\t\t|\n'.expandtabs()
+        txt += f"{'-'*49}"
+        
+
+        # Plot the equity line
+        plt.figure(figsize=(25, 14))
+        plt.text(
+            date_flat_vector[0], np.max(np.concatenate([equity_line_arrays_list, [buy_and_hold_array]])) * 0.75,
+            txt, fontsize=12
+        )
+
+        # Plotting equity lines
+        for eq_line_array in equity_line_arrays_list:
+            plt.plot(date_flat_vector, eq_line_array.reshape(-1))
+        plt.plot(date_flat_vector, self.window_dict['closes_test'].reshape(-1), color='black', linewidth=3.0)
+
+        # Adjusting X-axis and Y-axis
+        ax = plt.gca()
+        ax.set_title('Equity Line: Buy&Hold vs LSTM', va='center', fontsize=18)
+
+        # Set X-axis limits
+        plt.xlim(min(date_flat_vector), max(date_flat_vector))
+
+        # Set Y-axis limits based on min and max values across all data
+        y_min = min(np.min(eq_line_array) for eq_line_array in equity_line_arrays_list + [self.window_dict['closes_test']])
+        y_max = max(np.max(eq_line_array) for eq_line_array in equity_line_arrays_list + [self.window_dict['closes_test']])
+        plt.ylim(y_min, y_max)
+
+        # Format X-ticks as dates
+        ax.xaxis.set_major_locator(mdates.YearLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+
+        # Add vertical lines for each year
+        min_year = np.datetime64(date_flat_vector[0], 'Y').astype(int) + 1970
+        max_year = np.datetime64(date_flat_vector[-1], 'Y').astype(int) + 1970
+        date_list = [datetime.date(year, 1, 1) for year in range(min_year, max_year + 1)]
+        for date in date_list:
+            ax.axvline(date, ymin=0, ymax=1, ls='--', alpha=0.3, linewidth=0.5, color='black')
+
+        # Adjust layout
+        plt.tight_layout()
+
+        # Save the plot to a file
+        plt.savefig(f'{self.vis_dir}equity_line_summary_{timestamps_to_load[-1]}.png')
+        shutil.copy2(f'{self.vis_dir}equity_line_summary_{timestamps_to_load[-1]}.png', self.export_path)
+        self.logger.info(f"Saved Equity Line summary plot for {len(timestamps_to_load)} test cases: {self.vis_dir}equity_line_summary_{timestamps_to_load[-1]}.png")
+
+        self.logger.info(f"\nRESULTS:\n{txt}\n")

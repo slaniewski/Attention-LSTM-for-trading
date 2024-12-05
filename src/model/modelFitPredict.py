@@ -27,6 +27,10 @@ import time
 import re
 import glob
 import datetime
+import tensorflow_decision_forests as tfdf
+from sklearn.model_selection import KFold
+from sklearn.metrics import mean_absolute_error
+
 
 ## This is for pool of workers if multiprocess; however there might be memory leak(?)
 
@@ -267,11 +271,13 @@ class RollingLSTM:
         self.best_hp = tuner.get_best_hyperparameters(num_trials=1)[0]
 
         # Compare previous best model and current tuned model, retrieve best hyperparameters
+        use_old_model = True
         if i>0:
             current_best_score = tuner.oracle.get_best_trials(1)[0].metrics.get_best_value('val_loss')
             previous_best_score = min(hist.history['val_loss'])
             print(previous_best_score)
             if previous_best_score > current_best_score:
+                use_old_model = False
                 self.best_hp = tuner.get_best_hyperparameters(1)[0]
                 print(f"Current model outfperforms previous tuned model: Current score: {current_best_score}, Previous score: {previous_best_score} => ")
         # else: self.best_hp = tuner.get_best_hyperparameters(1)[0]
@@ -285,9 +291,11 @@ class RollingLSTM:
             writer.writerow(self.best_hp.values.values())
         shutil.copy2(f'{report_dir}optimal_hyperparams_{self.timestamp}.csv', self.export_path)
         
-        ## No need to build the model, we retrieve it from search
-
-        tuned_model = tuner.get_best_models(num_models=1)[0]
+        ## Check if old model is better than new
+        if use_old_model and i>0:
+            tuned_model = prev_model
+        else:
+            tuned_model = tuner.get_best_models(num_models=1)[0]
 
         # Save best model for future windows init
         tuned_model.save(f'{report_dir}best_model_window_{i}.h5')
@@ -331,9 +339,18 @@ class RollingLSTM:
             shared_result_dict[key] = trial_info
 
         # generate array of predictions from ith window and save it to dictionary (shared between processes)
-        shared_pred_dict[i] = tuned_model.predict(self.x_test[i], batch_size=int(self.config["model"]["BatchSizeTest"]), verbose=0)
-        # tuned_model.reset_states() not need since each process is independent
+        predictions_array = tuned_model.predict(self.x_test[i], batch_size=int(self.config["model"]["BatchSizeTest"]), verbose=0)
+        print(predictions_array)
+        if self.config["model"]["Problem"] == "regression": shared_pred_dict[i] = predictions_array
+        elif self.config["model"]["Problem"] == "classification": 
+            classes = [0, 1, -1]
+            shared_pred_dict[i] = [classes[most_probable_class] for most_probable_class in predictions_array.argmax(axis=-1)]
+            print(predictions_array)
+            print(predictions_array.argmax(axis=-1))
+            print(shared_pred_dict[i])
+        
         return 0
+        # tuned_model.reset_states() not need since each process is independent
 
     def model_fit_predict_multiprocess(self, save=True) -> int:
         '''
@@ -383,8 +400,8 @@ class RollingLSTM:
             if not os.path.isdir(output_dir): os.mkdir(output_dir)
             with open(self.config["prep"]["PredictionsArray"], 'wb') as handle: 
                 pickle.dump(np.asarray(self.predictions, dtype=object), handle, protocol=pickle.HIGHEST_PROTOCOL)
-            shutil.copy2(history_csv_path, self.export_path)
-            shutil.copy2(f'{self.setup.ROOT_PATH}config.ini', self.export_path)
+            #shutil.copy2(history_csv_path, self.export_path)
+            #shutil.copy2(f'{self.setup.ROOT_PATH}config.ini', self.export_path)
 
         return 0
     
@@ -511,9 +528,10 @@ class RollingLSTM:
         # Load predictions array
         with open(self.config["prep"]["PredictionsArray"], 'rb') as handle: preds = pickle.load(handle)
         try:
+
             df_pred_eval = pd.DataFrame(
-                zip(self.window_dict['dates_test'].reshape(-1), preds.reshape(-1), self.window_dict['closes_test'].reshape(-1), ((closes[1:] - closes[:-1]) / closes[:-1]).reshape(-1)),
-                columns=['Date', 'Pred', 'Real', "Real_ret"]
+                zip(self.window_dict['dates_test'].reshape(-1), preds.reshape(-1), self.window_dict['closes_test'].reshape(-1)), 
+                columns=['Date', 'Pred', 'Real']
             )
         except:
             try:
@@ -525,15 +543,15 @@ class RollingLSTM:
             except:
                 print('tutaj2')
                 df_pred_eval = pd.DataFrame(
-                    zip(self.window_dict['dates_test'].reshape(-1), preds.reshape(-1), self.window_dict['closes_test'].reshape(-1)),
-                    columns=['Date', 'Pred', 'Real']
+                    zip(self.window_dict['dates_test'].reshape(-1), preds.reshape(-1), self.window_dict['closes_test'].reshape(-1), ((closes[1:] - closes[:-1]) / closes[:-1]).reshape(-1)),
+                    columns=['Date', 'Pred', 'Real', "Real_ret"]
                     
                 )
 
         # Save summary of runs
         with open(f'{self.config["prep"]["ReportDirSummary"]}training_results_{self.timestamp}.json', "w") as file:
             json.dump(self.log_result, file, indent=4)
-
+        print(df_pred_eval)
         # Save results to csv and pkl
         df_pred_eval.to_csv(f'{self.config["prep"]["DataOutputDir"]}model_eval_data_{self.timestamp}.csv', index=False)
         df_pred_eval.set_index("Date", inplace=True)
@@ -551,6 +569,381 @@ class RollingLSTM:
     #     self.logger.info(f"POST [{i}] GPU memory usage: {np.round(info.used/info.total*100, 2)}%")
 
 
+    def convert_to_dataframe(X, y):
+        # Assuming X has shape (num_samples, num_timesteps, num_features)
+        num_samples = X.shape[0]
+        num_timesteps = X.shape[1]
+        num_features = X.shape[2]
+        X_flat = X.reshape((num_samples, num_timesteps * num_features))
+        feature_names = [f'feature_{i}' for i in range(X_flat.shape[1])]
+        df_X = pd.DataFrame(X_flat, columns=feature_names)
+        df_y = pd.DataFrame(y, columns=['target'])
+        df = pd.concat([df_X, df_y], axis=1)
+        return df
+
+
+    def model_fit_predict_RF(self, i, shared_pred_dict, shared_result_dict): # shared_pred_dict
+        """
+        Training example was implemented according to machine-learning-mastery forum
+        The function takes data from the dictionary returned from splitWindows.create_windows function
+        https://machinelearningmastery.com/stateful-stateless-lstm-time-series-forecasting-python/
+        """
+        # start_time = time.time()
+        log_dir = self.tensorboard_logger # + time.strftime("%Y-%m-%d_%H-%M-%S")
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=10, write_graph=True)
+
+        # tuner = BayesianOptimization(
+        #     self.model_builder,
+        #     objective="val_loss",
+        #     max_trials=int(self.config["model"]["HyperParamTuneTrials"]),
+        #     executions_per_trial=int(self.config["model"]["ModelsPerTrial"]),
+        #     directory="models",
+        #     overwrite=True,
+        #     project_name=f"model_window_{i}",
+        #     # Optional: You can set the number of initial points to randomly sample before starting the BO.
+        #     # num_initial_points=10
+        # )
+
+
+
+        # history = History()
+        # print('ble_')
+        validation_window_size = int(self.config["model"]["ValidationWindow"])
+        # if self.config["model"]["Problem"] == "classification":
+        #     y_train = to_categorical(self.y_train[i][:-validation_window_size], num_classes=3)[:,0,:]
+        #     y_val = to_categorical(self.y_train[i][-validation_window_size:], num_classes=3)[:,0,:]
+        # elif self.config["model"]["Problem"] == "regression":
+        #     y_train = self.y_train[i][:-validation_window_size]
+        #     y_val = self.y_train[i][-validation_window_size:]
+        # else:
+        #     logging.error("Wrong problem type! Check config")
+        #     raise
+        # # print('ble_')
+        # if i == 0:
+        #     validation_set_shapes = (self.x_train[i][-validation_window_size:].shape, self.y_train[i][-validation_window_size:].shape)
+        #     print(f"TRAIN (features, targets): ({self.x_train.shape}, {self.y_train.shape})\nVAL: ({validation_set_shapes[0]}, {validation_set_shapes[1]})")
+        
+                # Define the model
+        rf_model = tfdf.keras.RandomForestModel(
+            num_trees=100,
+            max_depth=17,
+            max_features=8,
+            min_examples=2,  # Corresponds to min_samples_split in sklearn
+            # Other hyperparameters can be set here
+        )
+
+        # Compile the model (no need to specify loss for regression)
+        rf_model.compile(metrics=["mae"])
+
+        # Fit the model
+        rf_model.fit(train_df, label="target")
+
+        # Evaluate on training data
+        train_metrics = rf_model.evaluate(train_df, return_dict=True)
+
+        # If you have a validation set
+        val_df = convert_to_dataframe(self.x_train[i][-validation_window_size:], self.y_train[i][-validation_window_size:])
+        val_metrics = rf_model.evaluate(val_df, return_dict=True)
+
+        print(f"Training MAE: {train_metrics['mae']}")
+        print(f"Validation MAE: {val_metrics['mae']}")
+
+        # Instead of tuner.search(), use the Random Forest model
+
+        # Prepare data
+        train_df = convert_to_dataframe(self.x_train[i][:-validation_window_size], self.y_train[i][:-validation_window_size])
+        val_df = convert_to_dataframe(self.x_train[i][-validation_window_size:], self.y_train[i][-validation_window_size:])
+        if i == 0:
+            validation_set_shapes = (train_df.shape, val_df.shape)
+            print(f"TRAIN (features, targets): ({self.x_train.shape}, {self.y_train.shape})\nVAL: ({validation_set_shapes[0]}, {validation_set_shapes[1]})")
+
+        # Define the model
+        rf_model = tfdf.keras.RandomForestModel(
+            num_trees=hp.Int("num_trees", min_value=50, max_value=200, step=50),
+            max_depth=hp.Int("max_depth", min_value=5, max_value=20, step=5),
+            max_features=hp.Choice("max_features", values=[None, "auto", "sqrt", "log2", 8]),
+            min_examples=hp.Int("min_examples", min_value=2, max_value=10, step=2),
+        )
+
+        # Compile the model
+        rf_model.compile(metrics=["mae"])
+
+        # Fit the model
+        rf_model.fit(train_df, label="target")
+
+        # Evaluate the model
+        val_metrics = rf_model.evaluate(val_df, return_dict=True)
+        print(f"Validation MAE: {val_metrics['mae']}")
+
+
+        # # Define the tuner builder function
+        # def rf_model_builder(hp):
+        #     rf_model = tfdf.keras.RandomForestModel(
+        #         num_trees=hp.Int("num_trees", min_value=50, max_value=200, step=50),
+        #         max_depth=hp.Int("max_depth", min_value=5, max_value=20, step=5),
+        #         max_features=hp.Choice("max_features", values=[None, "auto", "sqrt", "log2", 8]),
+        #         min_examples=hp.Int("min_examples", min_value=2, max_value=10, step=2),
+        #         # Add other hyperparameters as needed
+        #     )
+        #     rf_model.compile(metrics=["mae"])
+        #     return rf_model
+
+        # from keras_tuner.tuners import BayesianOptimization
+
+        # # Create the tuner
+        # tuner = BayesianOptimization(
+        #     rf_model_builder,
+        #     objective="val_mae",
+        #     max_trials=10,
+        #     directory="rf_models",
+        #     project_name=f"rf_model_window_{i}",
+        # )
+
+        # tuner.search(
+        #     train_df,
+        #     validation_data=val_df,
+        #     label="target",
+        # )
+
+        # # Retrieve the best model
+        # best_hp = tuner.get_best_hyperparameters(num_trials=1)[0]
+        # best_model = tuner.get_best_models(num_models=1)[0]
+
+
+        # Save the model
+        rf_model.save(f'{report_dir}best_rf_model_window_{i}')
+
+        # Load the model
+        #loaded_model = tf.keras.models.load_model(f'{report_dir}best_rf_model_window_{i}')
+
+        # # Evaluate the previous LSTM model on the validation set
+        # prev_lstm_model = tf.keras.models.load_model(f'{report_dir}best_model_window_{i-1}.h5')
+        # prev_val_metrics = prev_lstm_model.evaluate(
+        #     self.x_train[i][-validation_window_size:], 
+        #     self.y_train[i][-validation_window_size:], 
+        #     batch_size=int(self.config["model"]["BatchSizeValidation"]), 
+        #     return_dict=True
+        # )
+
+        # # Compare validation MAE
+        # if val_metrics['mae'] < prev_val_metrics['mae']:
+        #     print("Random Forest model outperforms the previous LSTM model.")
+        #     # Proceed with the Random Forest model
+        # else:
+        #     print("Previous LSTM model performs better.")
+        #     # Consider using the LSTM model or further tuning
+
+
+        for i in range(num_windows):
+            # Prepare data
+            train_df = convert_to_dataframe(self.x_train[i][:-validation_window_size], self.y_train[i][:-validation_window_size])
+            val_df = convert_to_dataframe(self.x_train[i][-validation_window_size:], self.y_train[i][-validation_window_size:])
+            
+            # Define and train the Random Forest model
+            tuner = BayesianOptimization(
+            rf_model_builder,
+            objective="val_mae",
+            max_trials=10,
+            directory="rf_models",
+            project_name=f"rf_model_window_{i}",
+              )
+
+            tuner.search(
+            train_df,
+            validation_data=val_df,
+            label="target",
+              )
+
+            # Retrieve the best model
+            best_hp = tuner.get_best_hyperparameters(num_trials=1)[0]
+            best_model = tuner.get_best_models(num_models=1)[0]
+            # (Include hyperparameter tuning if desired)
+            
+            # Save the best model
+            rf_model.save(f'{report_dir}best_rf_model_window_{i}')
+            
+            # Optionally, compare with previous models and decide which to use
+
+            for trial in tuner.oracle.trials.values():
+                trial_id = trial.trial_id
+                trial_info = {}
+                
+                # 1. Extract hyperparameters
+                trial_info["hyperparameters"] = trial.hyperparameters.values
+                
+                # 2. Extract metrics
+                trial_info["final_loss"] = trial.metrics.get_best_value('loss')
+                trial_info["final_val_loss"] = trial.metrics.get_best_value('val_loss')
+                
+                # 3. Compute test_loss using the best model of this trial
+                best_model = tuner.load_model(trial)  # tuner.get_best_models(num_models=1)[0]
+                test_loss = best_model.evaluate(self.x_test[i], self.y_test[i], batch_size=int(self.config["model"]["BatchSizeTest"]), verbose=0)  # Make sure x_test and y_test are defined
+                trial_info["test_loss"] = test_loss if isinstance(test_loss, float) else test_loss[0]
+
+                # Store trial info in shared_result_dict using batch index and trial_id as key
+                key = f"batch_{i}_trial_{trial_id}"
+                shared_result_dict[key] = trial_info
+
+            # generate array of predictions from ith window and save it to dictionary (shared between processes)
+            predictions_array = best_model.predict(self.x_test[i], batch_size=int(self.config["model"]["BatchSizeTest"]), verbose=0)
+            print(predictions_array)
+            if self.config["model"]["Problem"] == "regression": shared_pred_dict[i] = predictions_array
+            elif self.config["model"]["Problem"] == "classification": 
+                classes = [0, 1, -1]
+                shared_pred_dict[i] = [classes[most_probable_class] for most_probable_class in predictions_array.argmax(axis=-1)]
+                print(predictions_array)
+                print(predictions_array.argmax(axis=-1))
+                print(shared_pred_dict[i])
+        
+
+
+
+
+
+
+
+
+
+
+        # print(f"[{i}/{self.x_train.shape[0]}] Tuning the model")
+        # if i == 0: tuner.search_space_summary()
+        
+        # # self.logger.info("[{i}/{self.x_train.shape[0]}] Tuning the model")
+        # validation_window_size = int(self.config["model"]["ValidationWindow"])
+        # if i==0:
+        #     self.logger.info(f"Train window dimensions (features, targets): {self.x_train.shape}, " + f"{self.y_train.shape}")
+        #     validation_set_shapes = (self.x_train[i][-validation_window_size:].shape, self.y_train[i][-validation_window_size:].shape)
+        #     self.logger.info(f"Validation window dimensions (features, targets): {validation_set_shapes[0]}, " + f"{validation_set_shapes[1]}")
+        # #change patience for different loss function if needed
+        # mm = 1 if self.hp_lss=='MSE' else 1
+        # #early stopping and reducing lr on plateau
+        # es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=5*mm, restore_best_weights = True, min_delta=self.early_stopping_min_delta)
+        # reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=0.0001)
+        
+        # Benchmark - previous best model
+        # Assume best_hp and best_weights_path are from the previous window
+        # report_dir = self.setup.ROOT_PATH + self.config["prep"]["ModelParamDir"]
+        # if i > 0:
+        #     #prev_model = self.model_builder(None)
+        #     #prev_model.load_weights(f'{report_dir}best_model_weights.h5')
+        #     # Load the previously saved best model
+        #     prev_model = load_model(f'{report_dir}best_model_window_{i-1}.h5')
+
+        # # Optionally, further fit the model on new data
+        #     # Optionally, do a brief training session with the new window data
+        #     hist = prev_model.fit(self.x_train[i][:-validation_window_size], y_train, epochs=int(self.config["model"]["Epochs"]), 
+        #                    batch_size = int(self.config["model"]["BatchSizeValidation"]) 
+        #                  , shuffle = False,
+        #               validation_data=(self.x_train[i][-validation_window_size:], y_val),
+        #               callbacks = [es, reduce_lr])
+
+
+        # # The search itself on new window
+        # tuner.search(
+        #     self.x_train[i][:-validation_window_size]
+        #     , y_train
+        #     , validation_data = (self.x_train[i][-validation_window_size:], y_val)
+        #     #, hyperparameters = keras_tuner.HyperParameters()
+        #     , epochs = int(self.config["model"]["Epochs"])
+        #     , batch_size = int(self.config["model"]["BatchSizeValidation"]) # it has to be validation one since there is no other way to specify, and obviously batch size <= sample size
+        #     , shuffle = False, callbacks = [es, reduce_lr], verbose = 1
+        #     # tensorboard_callback if needed
+        # )
+        
+        # self.best_hp = tuner.get_best_hyperparameters(num_trials=1)[0]
+
+        # # Compare previous best model and current tuned model, retrieve best hyperparameters
+        # use_old_model = True
+        # if i>0:
+        #     current_best_score = tuner.oracle.get_best_trials(1)[0].metrics.get_best_value('val_loss')
+        #     previous_best_score = min(hist.history['val_loss'])
+        #     print(previous_best_score)
+        #     if previous_best_score > current_best_score:
+        #         use_old_model = False
+        #         self.best_hp = tuner.get_best_hyperparameters(1)[0]
+        #         print(f"Current model outfperforms previous tuned model: Current score: {current_best_score}, Previous score: {previous_best_score} => ")
+        # # else: self.best_hp = tuner.get_best_hyperparameters(1)[0]
+        
+        # # Save best combination
+        # # report_dir = self.setup.ROOT_PATH + self.config["prep"]["ModelParamDir"]
+        # with open(f'{report_dir}optimal_hyperparams_{self.timestamp}.csv', "a") as fp: 
+        #     writer = csv.writer(fp, delimiter="\t",lineterminator="\n")
+        #     if i == 0:
+        #         writer.writerow(self.best_hp.values.keys())
+        #     writer.writerow(self.best_hp.values.values())
+        # shutil.copy2(f'{report_dir}optimal_hyperparams_{self.timestamp}.csv', self.export_path)
+        
+        # ## Check if old model is better than new
+        # if use_old_model and i>0:
+        #     tuned_model = prev_model
+        # else:
+        #     tuned_model = tuner.get_best_models(num_models=1)[0]
+
+        # Save best model for future windows init
+        # tuned_model.save(f'{report_dir}best_model_window_{i}.h5')
+        # tuned_model.save_weights(f'{report_dir}best_model_weights.h5')
+
+        # # Build the tuned model and train it; use early stopping for epochs
+        # tuned_model = tuner.hypermodel.build(optimal_hp)
+        # history = tuned_model.fit(
+        #     self.x_train[i][:-validation_window_size]
+        #     , self.y_train[i][:-validation_window_size]
+        #     , validation_data = (
+        #         self.x_train[i][-validation_window_size:]
+        #         , self.y_train[i][-validation_window_size:]
+        #     )
+        #     , epochs = int(self.config["model"]["Epochs"])
+        #     , batch_size = int(self.config["model"]["BatchSizeTrain"])
+        #     , shuffle = False
+        #     , verbose = 1
+        #     , callbacks = [es, tensorboard_callback]
+        # )
+
+        # # Extracting Information from Trials
+        # for trial in tuner.oracle.trials.values():
+        #     trial_id = trial.trial_id
+        #     trial_info = {}
+            
+        #     # 1. Extract hyperparameters
+        #     trial_info["hyperparameters"] = trial.hyperparameters.values
+            
+        #     # 2. Extract metrics
+        #     trial_info["final_loss"] = trial.metrics.get_best_value('loss')
+        #     trial_info["final_val_loss"] = trial.metrics.get_best_value('val_loss')
+            
+        #     # 3. Compute test_loss using the best model of this trial
+        #     best_model = tuner.load_model(trial)  # tuner.get_best_models(num_models=1)[0]
+        #     test_loss = best_model.evaluate(self.x_test[i], self.y_test[i], batch_size=int(self.config["model"]["BatchSizeTest"]), verbose=0)  # Make sure x_test and y_test are defined
+        #     trial_info["test_loss"] = test_loss if isinstance(test_loss, float) else test_loss[0]
+
+        #     # Store trial info in shared_result_dict using batch index and trial_id as key
+        #     key = f"batch_{i}_trial_{trial_id}"
+        #     shared_result_dict[key] = trial_info
+
+        # # generate array of predictions from ith window and save it to dictionary (shared between processes)
+        # predictions_array = tuned_model.predict(self.x_test[i], batch_size=int(self.config["model"]["BatchSizeTest"]), verbose=0)
+        # print(predictions_array)
+        # if self.config["model"]["Problem"] == "regression": shared_pred_dict[i] = predictions_array
+        # elif self.config["model"]["Problem"] == "classification": 
+        #     classes = [0, 1, -1]
+        #     shared_pred_dict[i] = [classes[most_probable_class] for most_probable_class in predictions_array.argmax(axis=-1)]
+        #     print(predictions_array)
+        #     print(predictions_array.argmax(axis=-1))
+        #     print(shared_pred_dict[i])
+        
+        # return 0
+        # tuned_model.reset_states() not need since each process is independent
+
+    def shapp():
+        import shap
+
+        # Prepare data for SHAP
+        X_train_flat = self.x_train[i][:-validation_window_size].reshape((num_samples, -1))
+        explainer = shap.TreeExplainer(rf_model)
+        shap_values = explainer.shap_values(X_train_flat)
+
+        # Plot SHAP values
+        shap.summary_plot(shap_values, X_train_flat)
 
 ### Extensions
 # from sklearn.ensemble import RandomForestRegressor

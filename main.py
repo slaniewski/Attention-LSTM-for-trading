@@ -7,30 +7,31 @@ import src.visualization as vis
 #import os
 #os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import tensorflow as tf
+from datetime import datetime
 
 def main():
-
+    start_time = datetime.now()
     # Preprocessing
-    prep = pr.TrainPrep()
+    # prep = pr.TrainPrep()
 
-    #prep.prep_icsa()
+    # #prep.prep_icsa()
 
-  #  prep.prep_tis()
+    # prep.prep_tis()
 
-  #  prep.join_inputs()
+    # prep.join_inputs()
 
     # # Data split into train-test windows
-  #  ws = pr.WindowSplit()
+    # ws = pr.WindowSplit()
 
-  #  ws.generate_windows()
+    # ws.generate_windows()
 
-    # # # Fit, Predict, save predictions
-    # print(tf.version.VERSION)
-    # fp = mod.RollingLSTM()
+    # Fit, Predict, save predictions
+    print(tf.version.VERSION)
+    fp = mod.RollingLSTM()
 
-    # fp.model_fit_predict_multiprocess()
+    fp.model_fit_predict_multiprocess()
 
-    # fp.save_results()
+    fp.save_results()
 
 
     # # # # Get performance metrics
@@ -40,7 +41,7 @@ def main():
 
 
     # # Visualize results
-    vs = vis.Plots()
+    vs = vis.Plots(start_time)
     vs.load_performance_data()
     vs.hist()
 
@@ -81,3 +82,5 @@ if __name__ == "__main__":
     ##except:
     #    # Invalid device or cannot modify virtual devices once initialized.
     #    pass
+
+   

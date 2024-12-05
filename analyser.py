@@ -1,9 +1,9 @@
-
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-namm = "2023-11-17_01-26"
+#namm = "2023-11-17_01-26"
+namm = "2024-03-19_04-28"
 # Load the JSON file
 with open(f'reports/summary/training_results_{namm}.json', 'r') as f:
     results = json.load(f)

@@ -283,28 +283,28 @@
 #         return max_consecutive_losses / scale
     
 #     @staticmethod
-#     def days_to_new_peak(returns_array: np.array) -> int:
-#         """
-#         Days to New Peak (DNP)
-#         Calculates the maximum number of consecutive days until a new peak in returns was achieved.
+    # def days_to_new_peak(returns_array: np.array) -> int:
+    #     """
+    #     Days to New Peak (DNP)
+    #     Calculates the maximum number of consecutive days until a new peak in returns was achieved.
         
-#         :param returns_array: Array of cumulative investment returns.
-#         :return: DNP (Days to New Peak)
-#         """
+    #     :param returns_array: Array of cumulative investment returns.
+    #     :return: DNP (Days to New Peak)
+    #     """
         
-#         max_days_to_peak = 0
-#         current_days_to_peak = 0
-#         current_peak = returns_array[0]
+    #     max_days_to_peak = 0
+    #     current_days_to_peak = 0
+    #     current_peak = returns_array[0]
 
-#         for ret in returns_array:
-#             if ret > current_peak:
-#                 current_peak = ret
-#                 current_days_to_peak = 0
-#             else:
-#                 current_days_to_peak += 1
-#                 max_days_to_peak = max(max_days_to_peak, current_days_to_peak)
+    #     for ret in returns_array:
+    #         if ret > current_peak:
+    #             current_peak = ret
+    #             current_days_to_peak = 0
+    #         else:
+    #             current_days_to_peak += 1
+    #             max_days_to_peak = max(max_days_to_peak, current_days_to_peak)
 
-#         return max_days_to_peak
+    #     return max_days_to_peak
 
     
 #     @staticmethod

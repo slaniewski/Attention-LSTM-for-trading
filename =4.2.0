@@ -1,0 +1,24 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting nbformat
+  Downloading nbformat-5.9.2-py3-none-any.whl (77 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 77.6/77.6 KB 1.1 MB/s eta 0:00:00
+Requirement already satisfied: jupyter-core in /home/steel/.local/lib/python3.10/site-packages (from nbformat) (5.7.1)
+Requirement already satisfied: traitlets>=5.1 in /home/steel/.local/lib/python3.10/site-packages (from nbformat) (5.14.1)
+Collecting jsonschema>=2.6
+  Downloading jsonschema-4.21.1-py3-none-any.whl (85 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 85.5/85.5 KB 4.5 MB/s eta 0:00:00
+Collecting fastjsonschema
+  Downloading fastjsonschema-2.19.1-py3-none-any.whl (23 kB)
+Collecting referencing>=0.28.4
+  Downloading referencing-0.33.0-py3-none-any.whl (26 kB)
+Collecting rpds-py>=0.7.1
+  Downloading rpds_py-0.17.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 10.9 MB/s eta 0:00:00
+Collecting jsonschema-specifications>=2023.03.6
+  Downloading jsonschema_specifications-2023.12.1-py3-none-any.whl (18 kB)
+Collecting attrs>=22.2.0
+  Downloading attrs-23.2.0-py3-none-any.whl (60 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 60.8/60.8 KB 17.8 MB/s eta 0:00:00
+Requirement already satisfied: platformdirs>=2.5 in /home/steel/.local/lib/python3.10/site-packages (from jupyter-core->nbformat) (4.2.0)
+Installing collected packages: fastjsonschema, rpds-py, attrs, referencing, jsonschema-specifications, jsonschema, nbformat
+Successfully installed attrs-23.2.0 fastjsonschema-2.19.1 jsonschema-4.21.1 jsonschema-specifications-2023.12.1 nbformat-5.9.2 referencing-0.33.0 rpds-py-0.17.1

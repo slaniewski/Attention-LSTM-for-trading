@@ -1,5 +1,6 @@
 import json
-with open('reports/model_hyperparams_2023-10-29_18-02.json', 'r') as f:
+namm = "2024-03-19_04-28"
+with open(f'reports/model_hyperparams_2023-10-29_18-02.json', 'r') as f:
     models   = json.load(f)
 
 value_counts = {}
